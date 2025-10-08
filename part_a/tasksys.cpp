@@ -1,5 +1,5 @@
 #include "tasksys.h"
-
+#include <thread>
 
 IRunnable::~IRunnable() {}
 
@@ -11,6 +11,8 @@ ITaskSystem::~ITaskSystem() {}
  * Serial task system implementation
  * ================================================================
  */
+
+using namespace std;
 
 const char* TaskSystemSerial::name() {
     return "Serial";
@@ -55,22 +57,29 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
+    _num_threads = num_threads;
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
 
+    // spawn worker threads
+    std::thread* threads = new std::thread[_num_threads];
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Part A.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
+    for (int i = 0; i < _num_threads; i++) {
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
+        for (int j = 0; j < num_total_tasks; j = j + _num_threads) {
+            threads[j] = std::thread(IRunnable::runTask, runnable, j, num_total_tasks);
+        }
     }
+
+    // Wait for spawned threads to complete.
+    for (int i = 0; i < _num_threads; i++) {
+        threads[i].join();
+    }
+    delete[] threads;
+
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -101,18 +110,34 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
+    // _num_threads = num_threads;
+
+    // spawn worker threads
+    std::thread* threads = new std::thread[num_threads];
+
+
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
 
+    // initialize arr of bools for all tasks
+    vector<int> tasks;
+    for (int i = 0; i < num_total_tasks; i++) {
+        tasks.push_back(i); // to represent the indexes we have not yet processed
+    }
 
     //
     // TODO: CS149 students will modify the implementation of this
     // method in Part A.  The implementation provided below runs all
     // tasks sequentially on the calling thread.
     //
+
+    while (tasks.size() != 0) {
+        // threads[j] = std::thread(IRunnable::runTask, runnable, j, num_total_tasks);
+        runnable -> runTask(tasks[0], num_total_tasks);
+    }
 
     for (int i = 0; i < num_total_tasks; i++) {
         runnable->runTask(i, num_total_tasks);
