@@ -1,5 +1,8 @@
 #include "tasksys.h"
 #include <thread>
+#include <mutex>
+#include <queue>
+#include <atomic>
 
 IRunnable::~IRunnable() {}
 
@@ -50,6 +53,7 @@ const char* TaskSystemParallelSpawn::name() {
     return "Parallel + Always Spawn";
 }
 
+
 TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads) {
     //
     // TODO: CS149 student implementations may decide to perform setup
@@ -62,24 +66,36 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
+void TaskSystemParallelSpawn::workToRun(IRunnable* runnable, int start, int end, int num_total_tasks) {
+    for (int i = start; i < end; ++i) {
+        runnable->runTask(i, num_total_tasks);
+    }
+}
+
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
 
-    // spawn worker threads
-    std::thread* threads = new std::thread[_num_threads];
+    vector<thread> threads;
+    threads.reserve(_num_threads);
+
+    // split up our tasks across workers
+    // so that way the amount of work per thread is just always equal for simplicty
+    int block_size = (num_total_tasks + _num_threads - 1) / _num_threads;  
 
     for (int i = 0; i < _num_threads; i++) {
+        // get the next chunk
+        int start = i * block_size;
+        int end = min(start + block_size, num_total_tasks);
 
-        for (int j = 0; j < num_total_tasks; j = j + _num_threads) {
-            threads[j] = std::thread(IRunnable::runTask, runnable, j, num_total_tasks);
-        }
+        // check we haven't run out of tasks
+        if (start >= num_total_tasks)
+            break; 
+
+        threads.emplace_back(workToRun, runnable, start, end, num_total_tasks);
     }
 
-    // Wait for spawned threads to complete.
-    for (int i = 0; i < _num_threads; i++) {
-        threads[i].join();
+    for (auto& thread : threads) {
+        thread.join();
     }
-    delete[] threads;
-
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -110,37 +126,39 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
-    // _num_threads = num_threads;
+    _num_threads = num_threads;
 
     // spawn worker threads
-    std::thread* threads = new std::thread[num_threads];
-
-
+    threads_.reserve(_num_threads);
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
 
-    // initialize arr of bools for all tasks
-    vector<int> tasks;
-    for (int i = 0; i < num_total_tasks; i++) {
-        tasks.push_back(i); // to represent the indexes we have not yet processed
+    // assuming we are 0 indexed
+    atomic<int> task_indexes_to_run(num_total_tasks - 1);
+    vector<thread> threads_;
+
+    // when we spin up each of the threads...
+    for (size_t i = 0; i < _num_threads; ++i) {
+        threads_.emplace_back([&task_indexes_to_run, runnable, num_total_tasks] {
+            while (true) {
+                int taskIndex = task_indexes_to_run.fetch_sub(1);
+
+                // if we ran out of tasks, exit
+                if (taskIndex < 0) {
+                    break;
+                }
+
+                runnable->runTask(taskIndex, num_total_tasks);
+            }
+        });
     }
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Part A.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
-
-    while (tasks.size() != 0) {
-        // threads[j] = std::thread(IRunnable::runTask, runnable, j, num_total_tasks);
-        runnable -> runTask(tasks[0], num_total_tasks);
-    }
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
+    // Wait for all threads to finish
+    for (auto& thread : threads_) {
+        thread.join();
     }
 }
 
@@ -172,6 +190,7 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
+    // might be useful... https://www.geeksforgeeks.org/cpp/thread-pool-in-cpp/
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
