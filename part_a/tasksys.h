@@ -4,6 +4,7 @@
 #include "itasksys.h"
 #include <vector>
 #include <thread>
+#include <atomic>
 
 using namespace std;
 /*
@@ -61,9 +62,21 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
                                 const std::vector<TaskID>& deps);
         void sync();
 
-    private:
-        int _num_threads = 0;
+        void spinningWork(IRunnable* runnable);
+
+        atomic<bool> stop;
+
+        atomic<int> tasks_remaining;
+        atomic<int> next_task_index;
+
+        // IRunnable* current_runnable = nullptr;
+        int total_tasks = 0;
+
         vector<thread> threads_;
+    private:
+        // bool is_done_;
+        // atomic<int> task_indexes_to_run_;
+        // IRunnable* cur_runnable_;
 };
 
 /*

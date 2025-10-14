@@ -126,40 +126,50 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
-    _num_threads = num_threads;
+    stop.store(false);
+    for (int i = 0; i < num_threads; i++) {
+        threads_.emplace_back(spinningWork, this);
+    }
 
-    // spawn worker threads
-    threads_.reserve(_num_threads);
+}
+
+void TaskSystemParallelThreadPoolSpinning::spinningWork(IRunnable* runnable) {
+
+    while (!stop.load()) {
+
+        if (tasks_remaining.load() > 0) {
+            int index = next_task_index.fetch_sub(1);
+
+            if (index >= 0) {
+                // run task
+                runnable->runTask(index, total_tasks);
+                tasks_remaining.fetch_sub(1);
+        // no more tasks 
+        } else {
+            stop.store(true);
+        }
+    }
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
 
-    // assuming we are 0 indexed
-    atomic<int> task_indexes_to_run(num_total_tasks - 1);
-    vector<thread> threads_;
+    // Initialize task counters
+    next_task_index.store(num_total_tasks - 1);
+    tasks_remaining.store(num_total_tasks);
+    total_tasks = num_total_tasks;
 
-    // when we spin up each of the threads...
-    for (size_t i = 0; i < _num_threads; ++i) {
-        threads_.emplace_back([&task_indexes_to_run, runnable, num_total_tasks] {
-            while (true) {
-                int taskIndex = task_indexes_to_run.fetch_sub(1);
-
-                // if we ran out of tasks, exit
-                if (taskIndex < 0) {
-                    break;
-                }
-
-                runnable->runTask(taskIndex, num_total_tasks);
-            }
-        });
+    // Wait until all tasks are done
+    while (tasks_remaining.load() > 0) {
+        std::this_thread::yield(); 
     }
 
-    // Wait for all threads to finish
+    stop.store(true)
+
     for (auto& thread : threads_) {
         thread.join();
-    }
+    } 
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
