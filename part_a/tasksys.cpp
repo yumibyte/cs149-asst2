@@ -3,6 +3,7 @@
 #include <mutex>
 #include <queue>
 #include <atomic>
+#include <cstdio>
 
 IRunnable::~IRunnable() {}
 
@@ -66,36 +67,45 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
-void TaskSystemParallelSpawn::workToRun(IRunnable* runnable, int start, int end, int num_total_tasks) {
-    for (int i = start; i < end; ++i) {
-        runnable->runTask(i, num_total_tasks);
+void TaskSystemParallelSpawn::workToRun(IRunnable* runnable) {
+    while (true) {
+
+        int next_task_id = tasks_remaining.fetch_sub(1) - 1;
+        if (next_task_id < 0) {
+            printf("broke out because < 0\n");
+            break;
+        }
+        printf("running id: %d\n", next_task_id);
+        runnable -> runTask(next_task_id, total_tasks);
     }
 }
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
 
+    // increment our tasks for this provided run
+    tasks_remaining.store(num_total_tasks);
+    total_tasks.store(num_total_tasks);
+    printf("initializing with total_tasks: %d\n", num_total_tasks);
+
+    printf("tasks remaining: %d\n", tasks_remaining.load());
+    printf("total tasks: %d\n", total_tasks.load());
+
+    // initialize our threads, although inefficient, at the beginning
+    // of our run function
     vector<thread> threads;
     threads.reserve(_num_threads);
 
-    // split up our tasks across workers
-    // so that way the amount of work per thread is just always equal for simplicty
-    int block_size = (num_total_tasks + _num_threads - 1) / _num_threads;  
-
-    for (int i = 0; i < _num_threads; i++) {
-        // get the next chunk
-        int start = i * block_size;
-        int end = min(start + block_size, num_total_tasks);
-
-        // check we haven't run out of tasks
-        if (start >= num_total_tasks)
-            break; 
-
-        threads.emplace_back(workToRun, runnable, start, end, num_total_tasks);
+    for (int i = 0; i < _num_threads; ++i) {
+        threads.emplace_back(&TaskSystemParallelSpawn::workToRun, this, runnable);
     }
 
     for (auto& thread : threads) {
         thread.join();
     }
+
+    total_tasks.store(0);
+    tasks_remaining.store(0);
+
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -119,57 +129,64 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
     return "Parallel + Thread Pool + Spin";
 }
 
+void TaskSystemParallelThreadPoolSpinning::spinningWork() {
+    int nothing = 1;
+    // while (!stop.load()) {
+
+    //     if (tasks_remaining.load() > 0) {
+    //         int index = next_task_index.fetch_sub(1);
+
+    //         if (current_runnable == nullptr) {
+    //             if (index >= 0) {
+    //                 // run task
+    //                 current_runnable->runTask(index, total_tasks);
+    //                 tasks_remaining.fetch_sub(1);
+    //             }
+    //         }
+    //     // no more tasks 
+    //     } else {
+    //         stop.store(true);
+    //     }
+    // }
+}
+
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads) {
+    int nothing = 1;
     //
     // TODO: CS149 student implementations may decide to perform setup
     // operations (such as thread pool construction) here.
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
-    stop.store(false);
-    for (int i = 0; i < num_threads; i++) {
-        threads_.emplace_back(spinningWork, this);
-    }
+    // stop.store(false);
+    // for (int i = 0; i < num_threads; i++) {
+    //     threads_.emplace_back(&TaskSystemParallelThreadPoolSpinning::spinningWork, this);
+    // }
 
-}
-
-void TaskSystemParallelThreadPoolSpinning::spinningWork(IRunnable* runnable) {
-
-    while (!stop.load()) {
-
-        if (tasks_remaining.load() > 0) {
-            int index = next_task_index.fetch_sub(1);
-
-            if (index >= 0) {
-                // run task
-                runnable->runTask(index, total_tasks);
-                tasks_remaining.fetch_sub(1);
-        // no more tasks 
-        } else {
-            stop.store(true);
-        }
-    }
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
+    int nothing = 1;
 
     // Initialize task counters
-    next_task_index.store(num_total_tasks - 1);
-    tasks_remaining.store(num_total_tasks);
-    total_tasks = num_total_tasks;
+    // next_task_index.store(num_total_tasks - 1);
+    // tasks_remaining.store(num_total_tasks);
+    // total_tasks = num_total_tasks;
 
-    // Wait until all tasks are done
-    while (tasks_remaining.load() > 0) {
-        std::this_thread::yield(); 
-    }
+    // current_runnable = runnable;
 
-    stop.store(true)
+    // // Wait until all tasks are done
+    // while (tasks_remaining.load() > 0) {
+    //     std::this_thread::yield(); 
+    // }
 
-    for (auto& thread : threads_) {
-        thread.join();
-    } 
+    // stop.store(true);
+
+    // for (auto& thread : threads_) {
+    //     thread.join();
+    // } 
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,

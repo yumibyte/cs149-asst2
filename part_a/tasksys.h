@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 using namespace std;
 /*
@@ -30,6 +31,7 @@ class TaskSystemSerial: public ITaskSystem {
  * call.  See definition of ITaskSystem in itasksys.h for documentation
  * of the ITaskSystem interface.
  */
+
 class TaskSystemParallelSpawn: public ITaskSystem {
     public:
         TaskSystemParallelSpawn(int num_threads);
@@ -39,10 +41,13 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
-        static void workToRun(IRunnable* runnable, int start, int end, int num_total_tasks);
+
+        void workToRun(IRunnable* runnable);
 
     private:
 
+        atomic<int> tasks_remaining{0};
+        atomic<int> total_tasks{0};
         int _num_threads = 0;
 };
 
@@ -62,14 +67,14 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
                                 const std::vector<TaskID>& deps);
         void sync();
 
-        void spinningWork(IRunnable* runnable);
+        void spinningWork();
 
         atomic<bool> stop;
 
         atomic<int> tasks_remaining;
         atomic<int> next_task_index;
 
-        // IRunnable* current_runnable = nullptr;
+        IRunnable* current_runnable = nullptr;
         int total_tasks = 0;
 
         vector<thread> threads_;
