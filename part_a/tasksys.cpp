@@ -72,8 +72,10 @@ void TaskSystemParallelSpawn::workToRun(IRunnable* runnable) {
         int next_task_id = tasks.fetch_sub(1) - 1;
 
         if (next_task_id < 0) {
+            printf("thread exiting for task id: %d\n", next_task_id);
             break;
         }
+        printf("Running task %d\n", next_task_id);
         runnable -> runTask(next_task_id, total_tasks);
     }
 }
@@ -121,14 +123,21 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 }
 
 void TaskSystemParallelThreadPoolSpinning::spinningWork() {
-    while (true) {
+    while (!is_done) {
         if (cur_runnable != nullptr) {
             int next_task_id = tasks.fetch_sub(1) - 1;
 
             if (next_task_id < 0) {
-                break;
+                printf("thread exiting for task id: %d\n", next_task_id);
+                std::this_thread::yield();
+                continue;
             }
+            printf("Running task %d\n", next_task_id);
             cur_runnable -> runTask(next_task_id, total_tasks);
+
+        } else {
+            std::this_thread::yield();
+            printf("Not running yet because cur_runnable is null\n");
         }
     }
 }
@@ -143,16 +152,25 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 
     // initialize our threads, although inefficient, at the beginning
     // of our run function
-    vector<thread> threads;
-    threads.reserve(num_threads_);
+    threads_.reserve(num_threads_);
+    cur_runnable = nullptr;
 
     for (int i = 0; i < num_threads_; ++i) {
-        threads.emplace_back(&TaskSystemParallelSpawn::workToRun, this, nullptr);
+        printf("setup thread %d\n", i);
+        threads_.emplace_back(&TaskSystemParallelThreadPoolSpinning::spinningWork, this);
     }
  
 }
 
-TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
+TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
+
+    is_done = true;
+    for (auto& thread : threads_) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
     // for (int i = 0; i < num_total_tasks; i++) {
@@ -160,12 +178,16 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     // }
     // track the order of the tasks and add them into a queue to be used
     tasks.store(num_total_tasks);
-    total_tasks = num_total_tasks;
+    total_tasks.store(num_total_tasks);
+    cur_runnable = runnable;
 
-    for (auto& thread : threads_) {
-        thread.join();
+    while (tasks.load() > 0) {
+        std::this_thread::yield();
     }
 
+    total_tasks.store(0);
+    cur_runnable = nullptr;
+    printf("Finished all tasks!\n");
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,

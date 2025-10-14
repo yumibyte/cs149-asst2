@@ -48,7 +48,6 @@ class TaskSystemParallelSpawn: public ITaskSystem {
     private:
 
         atomic<int> tasks;
-        mutex task_lock;
         atomic<int> total_tasks{0};
         int num_threads_ = 0;
 };
@@ -71,11 +70,15 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
 
         void spinningWork();
     private:
-        IRunnable* cur_runnable = nullptr;
-        int total_tasks = 0;
-        atomic<int> tasks;
-        int num_threads_;
+        IRunnable* cur_runnable;
         vector<thread> threads_;
+
+        atomic<int> active_workers;
+        atomic<int> tasks;
+        atomic<int> total_tasks{0};
+        int num_threads_ = 0;
+
+        bool is_done = false;
 };
 
 /*
