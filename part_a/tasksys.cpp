@@ -69,26 +69,26 @@ TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::workToRun(IRunnable* runnable) {
     while (true) {
+        lock_guard<mutex> lock(task_lock);
+        int next_task_id = tasks.front();
 
-        int next_task_id = tasks_remaining.fetch_sub(1) - 1;
-        if (next_task_id < 0) {
-            printf("broke out because < 0\n");
+        if (tasks.size() == 0) {
             break;
         }
-        printf("running id: %d\n", next_task_id);
         runnable -> runTask(next_task_id, total_tasks);
+        tasks.pop();
     }
 }
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
+    // track the order of the tasks and add them into a queue to be used
+    for (int i = 0; i < num_total_tasks; i++) {
+        tasks.push(i);
+    }
 
-    // increment our tasks for this provided run
-    tasks_remaining.store(num_total_tasks);
     total_tasks.store(num_total_tasks);
-    printf("initializing with total_tasks: %d\n", num_total_tasks);
-
-    printf("tasks remaining: %d\n", tasks_remaining.load());
-    printf("total tasks: %d\n", total_tasks.load());
+    // printf("initializing with total_tasks: %d\n", num_total_tasks);
+    // printf("total tasks: %d\n", total_tasks.load());
 
     // initialize our threads, although inefficient, at the beginning
     // of our run function
@@ -104,8 +104,6 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
     }
 
     total_tasks.store(0);
-    tasks_remaining.store(0);
-
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -168,7 +166,9 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
-    int nothing = 1;
+    for (int i = 0; i < num_total_tasks; i++) {
+        runnable->runTask(i, num_total_tasks);
+    }
 
     // Initialize task counters
     // next_task_index.store(num_total_tasks - 1);

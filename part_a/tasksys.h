@@ -6,6 +6,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <queue>
 
 using namespace std;
 /*
@@ -46,7 +47,9 @@ class TaskSystemParallelSpawn: public ITaskSystem {
 
     private:
 
-        atomic<int> tasks_remaining{0};
+        queue<int> tasks;
+        mutex task_lock;
+        // atomic<int> tasks_remaining{0};
         atomic<int> total_tasks{0};
         int _num_threads = 0;
 };
