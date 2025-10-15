@@ -7,6 +7,7 @@
 #include <atomic>
 #include <mutex>
 #include <queue>
+#include <condition_variable>
 
 using namespace std;
 /*
@@ -73,7 +74,7 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         IRunnable* cur_runnable;
         vector<thread> threads_;
 
-        // atomic<int> active_workers;
+        atomic<int> active_workers;
         mutex spinning_lock;
         mutex task_lock;
         mutex destructor_lock;
@@ -108,12 +109,18 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         IRunnable* cur_runnable;
         vector<thread> threads_;
 
-        mutex spinning_lock;
-        mutex task_lock;
+        condition_variable cv_;
+        bool stop_ = false;
         mutex destructor_lock;
-        atomic<int> tasks;
+        mutex run_lock;
+
+        mutex task_lock;
+        // atomic<int> tasks;
         int total_tasks;
+        queue<int> tasks;
         atomic<int> num_tasks_run;
+
+        mutex queue_mutex;
 
         atomic<bool> is_main_thread_done{false};
         atomic<bool> are_workers_done{false};
