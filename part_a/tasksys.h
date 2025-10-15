@@ -73,12 +73,17 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         IRunnable* cur_runnable;
         vector<thread> threads_;
 
-        atomic<int> active_workers;
+        // atomic<int> active_workers;
+        mutex spinning_lock;
+        mutex task_lock;
+        mutex destructor_lock;
         atomic<int> tasks;
-        atomic<int> total_tasks{0};
-        int num_threads_ = 0;
+        int total_tasks;
+        atomic<int> num_tasks_run;
 
-        bool is_done = false;
+        atomic<bool> is_main_thread_done{false};
+        atomic<bool> are_workers_done{false};
+
 };
 
 /*
@@ -96,6 +101,22 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+    private:
+        void sleepingWork();
+
+        IRunnable* cur_runnable;
+        vector<thread> threads_;
+
+        mutex spinning_lock;
+        mutex task_lock;
+        mutex destructor_lock;
+        atomic<int> tasks;
+        int total_tasks;
+        atomic<int> num_tasks_run;
+
+        atomic<bool> is_main_thread_done{false};
+        atomic<bool> are_workers_done{false};
 };
 
 #endif

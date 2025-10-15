@@ -123,21 +123,37 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 }
 
 void TaskSystemParallelThreadPoolSpinning::spinningWork() {
-    while (!is_done) {
+    while (!(is_main_thread_done.load())) {
+        unique_lock<mutex> lock(spinning_lock);
         if (cur_runnable != nullptr) {
-            int next_task_id = tasks.fetch_sub(1) - 1;
 
-            if (next_task_id < 0) {
-                printf("thread exiting for task id: %d\n", next_task_id);
-                std::this_thread::yield();
-                continue;
+            int next_task_id;
+            {
+                next_task_id = tasks.fetch_sub(1) - 1;
+
+                if (next_task_id < 0) {
+                    printf("thread id is invalid: %d\n", next_task_id);
+                    continue;
+                } 
             }
+            // spinning_lock.unlock();
+
             printf("Running task %d\n", next_task_id);
             cur_runnable -> runTask(next_task_id, total_tasks);
 
-        } else {
-            std::this_thread::yield();
-            printf("Not running yet because cur_runnable is null\n");
+            num_tasks_run.fetch_add(1);
+
+            // spinning_lock.lock();
+            if (num_tasks_run.load() == total_tasks) {
+
+
+                are_workers_done.store(true);
+                // must lock before this if we had unlocked...
+
+                cur_runnable = nullptr;
+
+                printf("set workers to all be done %d\n", are_workers_done.load());
+            }
         }
     }
 }
@@ -148,46 +164,52 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
     // operations (such as thread pool construction) here.
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
-    num_threads_ = num_threads; 
 
     // initialize our threads, although inefficient, at the beginning
     // of our run function
-    threads_.reserve(num_threads_);
     cur_runnable = nullptr;
 
-    for (int i = 0; i < num_threads_; ++i) {
-        printf("setup thread %d\n", i);
+    for (int i = 0; i < num_threads; ++i) {
         threads_.emplace_back(&TaskSystemParallelThreadPoolSpinning::spinningWork, this);
     }
  
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
+    printf("setting is done to true\n");
+    destructor_lock.lock();
+    is_main_thread_done.store(true);
 
-    is_done = true;
     for (auto& thread : threads_) {
+
         if (thread.joinable()) {
+
             thread.join();
         }
     }
+    destructor_lock.unlock();
 }
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
     // for (int i = 0; i < num_total_tasks; i++) {
     //     runnable->runTask(i, num_total_tasks);
     // }
+
     // track the order of the tasks and add them into a queue to be used
+    task_lock.lock();
+    is_main_thread_done.store(false);
+    are_workers_done.store(false);
+    num_tasks_run.store(0);
+
     tasks.store(num_total_tasks);
-    total_tasks.store(num_total_tasks);
+    total_tasks = num_total_tasks;
     cur_runnable = runnable;
 
-    while (tasks.load() > 0) {
-        std::this_thread::yield();
+    while (!(are_workers_done.load())) {
+        // printf("workers aren't done\n %d", are_workers_done);
     }
-
-    total_tasks.store(0);
-    cur_runnable = nullptr;
-    printf("Finished all tasks!\n");
+    printf("workers are done\n");
+    task_lock.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -211,6 +233,42 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
     return "Parallel + Thread Pool + Sleep";
 }
 
+void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
+    while (!(is_main_thread_done.load())) {
+        unique_lock<mutex> lock(spinning_lock);
+        if (cur_runnable != nullptr) {
+
+            int next_task_id;
+            {
+                next_task_id = tasks.fetch_sub(1) - 1;
+
+                if (next_task_id < 0) {
+                    printf("thread id is invalid: %d\n", next_task_id);
+                    continue;
+                } 
+            }
+            // spinning_lock.unlock();
+
+            printf("Running task %d\n", next_task_id);
+            cur_runnable -> runTask(next_task_id, total_tasks);
+
+            num_tasks_run.fetch_add(1);
+
+            // spinning_lock.lock();
+            if (num_tasks_run.load() == total_tasks) {
+
+
+                are_workers_done.store(true);
+                // must lock before this if we had unlocked...
+
+                cur_runnable = nullptr;
+
+                printf("set workers to all be done %d\n", are_workers_done.load());
+            }
+        }
+    }
+}
+
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
     //
     // TODO: CS149 student implementations may decide to perform setup
@@ -219,6 +277,12 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
     // (requiring changes to tasksys.h).
     //
     // might be useful... https://www.geeksforgeeks.org/cpp/thread-pool-in-cpp/
+    cur_runnable = nullptr;
+
+    for (int i = 0; i < num_threads; ++i) {
+        threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
+    }
+
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
@@ -228,6 +292,18 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
+    printf("setting is done to true\n");
+    destructor_lock.lock();
+    is_main_thread_done.store(true);
+
+    for (auto& thread : threads_) {
+
+        if (thread.joinable()) {
+
+            thread.join();
+        }
+    }
+    destructor_lock.unlock();
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
@@ -239,9 +315,23 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     // tasks sequentially on the calling thread.
     //
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
+    // for (int i = 0; i < num_total_tasks; i++) {
+    //     runnable->runTask(i, num_total_tasks);
+    // }
+    task_lock.lock();
+    is_main_thread_done.store(false);
+    are_workers_done.store(false);
+    num_tasks_run.store(0);
+
+    tasks.store(num_total_tasks);
+    total_tasks = num_total_tasks;
+    cur_runnable = runnable;
+
+    while (!(are_workers_done.load())) {
+        // printf("workers aren't done\n %d", are_workers_done);
     }
+    printf("workers are done\n");
+    task_lock.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
