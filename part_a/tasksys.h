@@ -71,7 +71,7 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
 
         void spinningWork();
     private:
-        IRunnable* cur_runnable;
+        atomic<IRunnable*> cur_runnable;
         vector<thread> threads_;
 
         atomic<int> active_workers;

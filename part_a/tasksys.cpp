@@ -121,35 +121,32 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 }
 
 void TaskSystemParallelThreadPoolSpinning::spinningWork() {
-    while (!(is_main_thread_done.load())) {
-        unique_lock<mutex> lock(spinning_lock);
-        if (cur_runnable != nullptr) {
+    while (true) {
+        // Check for shutdown and no more tasks
+        if (is_main_thread_done.load() && tasks.load() <= 0) {
+            break; 
+        }
 
-            int next_task_id;
-            {
-                next_task_id = tasks.fetch_sub(1) - 1;
+        IRunnable* task_runner = cur_runnable.load();
+        if (task_runner == nullptr) {
+            std::this_thread::yield();
+            continue;
+        }
+        int next_task_id = tasks.fetch_sub(1) - 1;
 
-                if (next_task_id < 0) {
-                    // printf("thread id is invalid: %d\n", next_task_id);
-                    continue;
-                } 
-            }
+        if (next_task_id < 0) {
+            std::this_thread::yield(); 
+            continue;
+        }
 
-            // printf("Running task %d\n", next_task_id);
-            cur_runnable -> runTask(next_task_id, total_tasks);
+        // printf("running next task %d\n", next_task_id);
+        task_runner->runTask(next_task_id, total_tasks);
 
-            num_tasks_run.fetch_add(1);
-
-            if (num_tasks_run.load() == total_tasks) {
-
-
-                are_workers_done.store(true);
-                // must lock before this if we had unlocked...
-
-                cur_runnable = nullptr;
-
-                // printf("set workers to all be done %d\n", are_workers_done.load());
-            }
+        int done = num_tasks_run.fetch_add(1) + 1;
+        if (done == total_tasks) {
+            are_workers_done.store(true);
+            cur_runnable.store(nullptr);
+            // printf("triggering done\n");
         }
     }
 }
@@ -175,6 +172,7 @@ TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
     // printf("setting is done to true\n");
     destructor_lock.lock();
     is_main_thread_done.store(true);
+    // cur_runnable.store(nullptr);
 
     for (auto& thread : threads_) {
 
@@ -189,19 +187,21 @@ TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
 
     // track the order of the tasks and add them into a queue to be used
-    task_lock.lock();
+    unique_lock<mutex> lock(task_lock);
     is_main_thread_done.store(false);
     are_workers_done.store(false);
     num_tasks_run.store(0);
 
     tasks.store(num_total_tasks);
     total_tasks = num_total_tasks;
-    cur_runnable = runnable;
+    cur_runnable.store(runnable);
 
-    while (!(are_workers_done.load())) {
+    while (!(are_workers_done.load(memory_order_acquire))) {
+        this_thread::yield();
     }
-    printf("workers are done\n");
-    task_lock.unlock();
+    // printf("workers become done\n");
+    cur_runnable.store(nullptr);
+    // printf("workers are done\n");
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
