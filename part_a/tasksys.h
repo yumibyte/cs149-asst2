@@ -105,6 +105,7 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
 
     private:
         void sleepingWork();
+        void enqueue(int i);
 
         IRunnable* cur_runnable;
         vector<thread> threads_;
@@ -115,15 +116,17 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         mutex run_lock;
 
         mutex task_lock;
-        // atomic<int> tasks;
-        int total_tasks;
-        queue<int> tasks;
-        atomic<int> num_tasks_run;
-
         mutex queue_mutex;
 
-        atomic<bool> is_main_thread_done{false};
-        atomic<bool> are_workers_done{false};
+        queue<int> tasks;
+        int total_tasks;
+        // atomic<int> tasks;
+        atomic<int> num_tasks_run;
+        condition_variable done_cv;
+
+
+        // atomic<bool> is_main_thread_done{false};
+        // atomic<bool> are_workers_done{false};
 };
 
 #endif
