@@ -71,19 +71,17 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
 
         void spinningWork();
     private:
-        atomic<IRunnable*> cur_runnable;
         vector<thread> threads_;
 
-        atomic<int> active_workers;
-        mutex spinning_lock;
         mutex task_lock;
-        mutex destructor_lock;
-        atomic<int> tasks;
+        int tasks;
         int total_tasks;
-        atomic<int> num_tasks_run;
-
-        atomic<bool> is_main_thread_done{false};
-        atomic<bool> are_workers_done{false};
+        int tasks_remaining;
+        int num_tasks_completed;
+        IRunnable* current_runnable;
+        
+        bool is_main_thread_done{false};
+        bool are_workers_done{false};
 
 };
 

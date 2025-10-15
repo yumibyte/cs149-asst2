@@ -122,31 +122,32 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 
 void TaskSystemParallelThreadPoolSpinning::spinningWork() {
     while (true) {
-        // Check for shutdown and no more tasks
-        if (is_main_thread_done.load() && tasks.load() <= 0) {
-            break; 
+        IRunnable* task_runner = nullptr;
+        int task_id;
+        {
+            lock_guard<mutex> lock(task_lock);
+
+            if (is_main_thread_done) return;
+
+            if (tasks_remaining > 0 && current_runnable != nullptr) {
+                task_id = --tasks_remaining;
+                task_runner = current_runnable;
+            }
         }
+        if (task_runner && task_id >= 0) {
+            // printf("running next task %d\n", next_task_id);
+            task_runner->runTask(task_id, total_tasks);
 
-        IRunnable* task_runner = cur_runnable.load();
-        if (task_runner == nullptr) {
-            std::this_thread::yield();
-            continue;
-        }
-        int next_task_id = tasks.fetch_sub(1) - 1;
+            lock_guard<mutex> lock(task_lock);
+            num_tasks_completed++;
 
-        if (next_task_id < 0) {
-            std::this_thread::yield(); 
-            continue;
-        }
-
-        // printf("running next task %d\n", next_task_id);
-        task_runner->runTask(next_task_id, total_tasks);
-
-        int done = num_tasks_run.fetch_add(1) + 1;
-        if (done == total_tasks) {
-            are_workers_done.store(true);
-            cur_runnable.store(nullptr);
-            // printf("triggering done\n");
+            if (num_tasks_completed == total_tasks) {
+                are_workers_done = true;
+                current_runnable = nullptr;
+                // printf("triggering done\n");
+            }
+        } else {
+            this_thread::yield();
         }
     }
 }
@@ -160,7 +161,7 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 
     // initialize our threads, although inefficient, at the beginning
     // of our run function
-    cur_runnable = nullptr;
+    current_runnable = nullptr;
 
     for (int i = 0; i < num_threads; ++i) {
         threads_.emplace_back(&TaskSystemParallelThreadPoolSpinning::spinningWork, this);
@@ -170,37 +171,38 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
     // printf("setting is done to true\n");
-    destructor_lock.lock();
-    is_main_thread_done.store(true);
-    // cur_runnable.store(nullptr);
 
+    {
+        lock_guard<mutex> lock(task_lock);
+        is_main_thread_done = true;
+    }
     for (auto& thread : threads_) {
 
         if (thread.joinable()) {
-
             thread.join();
         }
     }
-    destructor_lock.unlock();
 }
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
 
     // track the order of the tasks and add them into a queue to be used
-    unique_lock<mutex> lock(task_lock);
-    is_main_thread_done.store(false);
-    are_workers_done.store(false);
-    num_tasks_run.store(0);
+    {
+        lock_guard<mutex> lock(task_lock);
+        current_runnable = runnable;
+        total_tasks = num_total_tasks;
+        tasks_remaining = num_total_tasks;
+        num_tasks_completed = 0;
+        are_workers_done = false;
+    }
 
-    tasks.store(num_total_tasks);
-    total_tasks = num_total_tasks;
-    cur_runnable.store(runnable);
-
-    while (!(are_workers_done.load(memory_order_acquire))) {
+    while (true) {
+        {
+            lock_guard<mutex> lock(task_lock);
+            if (are_workers_done) break;
+        }
         this_thread::yield();
     }
-    // printf("workers become done\n");
-    cur_runnable.store(nullptr);
     // printf("workers are done\n");
 }
 
@@ -233,10 +235,10 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
 
         {
             unique_lock<mutex> lock(queue_mutex);
-            printf("getting ready to execute a task\n");
+            // printf("getting ready to execute a task\n");
 
             cv_.wait(lock, [this] {
-                printf("put a thread to sleep\n");
+                // printf("put a thread to sleep\n");
                 return (!tasks.empty() && cur_runnable != nullptr) || stop_;
             });
 
@@ -249,12 +251,12 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
                 next_task_id = tasks.front();
                 tasks.pop();
                 task_runner = cur_runnable;  
-                printf("set next_task_id to be run for %d\n", next_task_id);
+                // printf("set next_task_id to be run for %d\n", next_task_id);
             }
 
         }
         if (task_runner != nullptr && next_task_id >= 0) {
-            printf("running next task %d\n", next_task_id);
+            // printf("running next task %d\n", next_task_id);
             task_runner->runTask(next_task_id, total_tasks);
 
             int done = num_tasks_run.fetch_add(1) + 1;
@@ -274,12 +276,12 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
     // (requiring changes to tasksys.h).
     //
     // might be useful... https://www.geeksforgeeks.org/cpp/thread-pool-in-cpp/
-    // cur_runnable = nullptr;
+    cur_runnable = nullptr;
 
-    // for (int i = 0; i < num_threads; ++i) {
-    //     threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
-    //     printf("initialize thread %d\n", i);
-    // }
+    for (int i = 0; i < num_threads; ++i) {
+        threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
+        // printf("initialize thread %d\n", i);
+    }
 
 }
 
@@ -289,17 +291,17 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     // operations (such as thread pool shutdown construction) here.
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
-    // {
-    //     unique_lock<mutex> lock(queue_mutex);
-    //     stop_ = true;
-    //     // printf("main thread is done\n");
-    // }
+    {
+        unique_lock<mutex> lock(queue_mutex);
+        stop_ = true;
+        // printf("main thread is done\n");
+    }
 
-    // cv_.notify_all();
+    cv_.notify_all();
 
-    // for (auto& thread: threads_) {
-    //     thread.join();
-    // }
+    for (auto& thread: threads_) {
+        thread.join();
+    }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
@@ -311,34 +313,31 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     // tasks sequentially on the calling thread.
     //
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
-    // unique_lock<mutex> lock(task_lock);
+    unique_lock<mutex> lock(task_lock);
     // printf("setting up run\n");
 
-    // cur_runnable = runnable;
-    // total_tasks = num_total_tasks;
-    // stop_ = false;
-    // num_tasks_run.store(0);
+    cur_runnable = runnable;
+    total_tasks = num_total_tasks;
+    stop_ = false;
+    num_tasks_run.store(0);
 
-    // for (int i = 0; i < num_total_tasks; i++) {
-    //     unique_lock<std::mutex> lock(queue_mutex);
-    //     printf("enqueue task i: %d\n", i);
-    //     tasks.push(i);
-    // }
-    // cv_.notify_all();
+    for (int i = 0; i < num_total_tasks; i++) {
+        unique_lock<std::mutex> lock(queue_mutex);
+        // printf("enqueue task i: %d\n", i);
+        tasks.push(i);
+    }
+    cv_.notify_all();
 
 
     // printf("finished setting in run\n");
-    // {
-    //     std::unique_lock<std::mutex> lock(queue_mutex);
-    //     done_cv.wait(lock, [this] {
-    //         return num_tasks_run.load() >= total_tasks;
-    //     });
-    // }
+    {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        done_cv.wait(lock, [this] {
+            return num_tasks_run.load() >= total_tasks;
+        });
+    }
 
-    // cur_runnable = nullptr;  // optional: clean up
+    cur_runnable = nullptr;  // optional: clean up
 
 }
 
