@@ -134,14 +134,12 @@ void TaskSystemParallelThreadPoolSpinning::spinningWork() {
                     continue;
                 } 
             }
-            // spinning_lock.unlock();
 
             // printf("Running task %d\n", next_task_id);
             cur_runnable -> runTask(next_task_id, total_tasks);
 
             num_tasks_run.fetch_add(1);
 
-            // spinning_lock.lock();
             if (num_tasks_run.load() == total_tasks) {
 
 
@@ -189,9 +187,6 @@ TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
 }
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
-    // for (int i = 0; i < num_total_tasks; i++) {
-    //     runnable->runTask(i, num_total_tasks);
-    // }
 
     // track the order of the tasks and add them into a queue to be used
     task_lock.lock();
@@ -204,9 +199,8 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     cur_runnable = runnable;
 
     while (!(are_workers_done.load())) {
-        // printf("workers aren't done\n %d", are_workers_done);
     }
-    // printf("workers are done\n");
+    printf("workers are done\n");
     task_lock.unlock();
 }
 
@@ -239,10 +233,10 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
 
         {
             unique_lock<mutex> lock(queue_mutex);
-            // printf("getting ready to execute a task\n");
+            printf("getting ready to execute a task\n");
 
             cv_.wait(lock, [this] {
-                // printf("put a thread to sleep\n");
+                printf("put a thread to sleep\n");
                 return (!tasks.empty() && cur_runnable != nullptr) || stop_;
             });
 
@@ -255,17 +249,17 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
                 next_task_id = tasks.front();
                 tasks.pop();
                 task_runner = cur_runnable;  
-                // printf("set next_task_id to be run for %d\n", next_task_id);
+                printf("set next_task_id to be run for %d\n", next_task_id);
             }
 
         }
         if (task_runner != nullptr && next_task_id >= 0) {
-            // printf("running next task %d\n", next_task_id);
+            printf("running next task %d\n", next_task_id);
             task_runner->runTask(next_task_id, total_tasks);
 
             int done = num_tasks_run.fetch_add(1) + 1;
             if (done == total_tasks) {
-                std::unique_lock<std::mutex> lock(queue_mutex);
+                lock_guard<mutex> lock(queue_mutex);
                 done_cv.notify_one();  // notify run() that all tasks are done
             }
         }
@@ -280,11 +274,12 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
     // (requiring changes to tasksys.h).
     //
     // might be useful... https://www.geeksforgeeks.org/cpp/thread-pool-in-cpp/
-    cur_runnable = nullptr;
+    // cur_runnable = nullptr;
 
-    for (int i = 0; i < num_threads; ++i) {
-        threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
-    }
+    // for (int i = 0; i < num_threads; ++i) {
+    //     threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
+    //     printf("initialize thread %d\n", i);
+    // }
 
 }
 
@@ -294,27 +289,18 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     // operations (such as thread pool shutdown construction) here.
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
-    {
-        unique_lock<mutex> lock(queue_mutex);
-        stop_ = true;
-        // printf("main thread is done\n");
-    }
+    // {
+    //     unique_lock<mutex> lock(queue_mutex);
+    //     stop_ = true;
+    //     // printf("main thread is done\n");
+    // }
 
-    cv_.notify_all();
+    // cv_.notify_all();
 
-    for (auto& thread: threads_) {
-        thread.join();
-    }
+    // for (auto& thread: threads_) {
+    //     thread.join();
+    // }
 }
-
-// void TaskSystemParallelThreadPoolSleeping::enqueue(int i) {
-//     {
-//         printf("enqueue task i: %d\n", i);
-//         unique_lock<std::mutex> lock(queue_mutex);
-//         tasks.push(i);
-//     }
-//     cv_.notify_one();
-// }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
 
@@ -325,34 +311,35 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     // tasks sequentially on the calling thread.
     //
 
-    unique_lock<mutex> lock(task_lock);
-
-    cur_runnable = runnable;
-    total_tasks = num_total_tasks;
-    stop_ = false;
-    num_tasks_run.store(0);
-
     for (int i = 0; i < num_total_tasks; i++) {
-        unique_lock<std::mutex> lock(queue_mutex);
-        // printf("enqueue task i: %d\n", i);
-        tasks.push(i);
+        runnable->runTask(i, num_total_tasks);
     }
-    cv_.notify_all();
+    // unique_lock<mutex> lock(task_lock);
+    // printf("setting up run\n");
+
+    // cur_runnable = runnable;
+    // total_tasks = num_total_tasks;
+    // stop_ = false;
+    // num_tasks_run.store(0);
+
+    // for (int i = 0; i < num_total_tasks; i++) {
+    //     unique_lock<std::mutex> lock(queue_mutex);
+    //     printf("enqueue task i: %d\n", i);
+    //     tasks.push(i);
+    // }
+    // cv_.notify_all();
 
 
     // printf("finished setting in run\n");
-    {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        done_cv.wait(lock, [this] {
-            return num_tasks_run.load() >= total_tasks;
-        });
-    }
-
-    cur_runnable = nullptr;  // optional: clean up
-
-    // while (!(are_workers_done.load())) {
-    //     // printf("workers aren't done\n %d", are_workers_done);
+    // {
+    //     std::unique_lock<std::mutex> lock(queue_mutex);
+    //     done_cv.wait(lock, [this] {
+    //         return num_tasks_run.load() >= total_tasks;
+    //     });
     // }
+
+    // cur_runnable = nullptr;  // optional: clean up
+
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
