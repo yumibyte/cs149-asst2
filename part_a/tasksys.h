@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <condition_variable>
+#include <unordered_map>
 
 using namespace std;
 /*
@@ -85,6 +86,14 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
 
 };
 
+struct TaskInfo {
+    IRunnable* runnable;
+    int num_total_tasks;
+    int num_finished_tasks = 0;
+    std::vector<TaskID> deps;      // dependencies
+    std::vector<TaskID> children;  // dependent launches
+    int remaining_deps = 0;        // count of unresolved deps
+};
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
  * optimized implementation of a parallel task execution engine that uses
@@ -118,13 +127,17 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
 
         queue<int> tasks;
         int total_tasks;
-        // atomic<int> tasks;
         atomic<int> num_tasks_run;
         condition_variable done_cv;
 
+        // for async task launches:
+        unordered_map<TaskID, TaskInfo> launches;
+        queue<TaskID> ready_queue;
+        atomic<int> next_task_id{0};
+        atomic<int> unfinished_launches{0};
 
-        // atomic<bool> is_main_thread_done{false};
-        // atomic<bool> are_workers_done{false};
+        mutex graph_mutex;
+        condition_variable sync_cv; 
 };
 
 #endif

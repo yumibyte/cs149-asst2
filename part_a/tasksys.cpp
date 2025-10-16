@@ -313,51 +313,139 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     // method in Parts A and B.  The implementation provided below runs all
     // tasks sequentially on the calling thread.
     //
+    std::vector<TaskID> no_deps;
+    printf("adding async task with %d total tasks\n", num_total_tasks);
+    runAsyncWithDeps(runnable, num_total_tasks, no_deps);
+    sync();
 
-    unique_lock<mutex> lock(task_lock);
-    // printf("setting up run\n");
+    // unique_lock<mutex> lock(task_lock);
+    // // printf("setting up run\n");
 
-    cur_runnable = runnable;
-    total_tasks = num_total_tasks;
-    stop_ = false;
-    num_tasks_run.store(0);
+    // cur_runnable = runnable;
+    // total_tasks = num_total_tasks;
+    // stop_ = false;
+    // num_tasks_run.store(0);
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        unique_lock<std::mutex> lock(queue_mutex);
-        // printf("enqueue task i: %d\n", i);
-        tasks.push(i);
-    }
-    cv_.notify_all();
+    // for (int i = 0; i < num_total_tasks; i++) {
+    //     unique_lock<std::mutex> lock(queue_mutex);
+    //     // printf("enqueue task i: %d\n", i);
+    //     tasks.push(i);
+    // }
+    // cv_.notify_all();
 
 
-    // printf("finished setting in run\n");
-    {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        done_cv.wait(lock, [this] {
-            return num_tasks_run.load() >= total_tasks;
-        });
-    }
+    // // printf("finished setting in run\n");
+    // {
+    //     std::unique_lock<std::mutex> lock(queue_mutex);
+    //     done_cv.wait(lock, [this] {
+    //         return num_tasks_run.load() >= total_tasks;
+    //     });
+    // }
 
-    cur_runnable = nullptr;  // optional: clean up
+    // cur_runnable = nullptr;  // optional: clean up
 
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                                     const std::vector<TaskID>& deps) {
+    
+    // printf("here2\n");
+    unique_lock<mutex> lock(graph_mutex);
 
+    TaskID id = next_task_id++;
 
-    //
-    // TODO: CS149 students will implement this method in Part B.
-    //
+    TaskInfo info;
+    info.runnable = runnable;
+    info.num_total_tasks = num_total_tasks;
+    info.deps = deps;
+    info.remaining_deps = deps.size();
 
-    return 0;
+    launches[id] = move(info);
+    unfinished_launches++;
+
+    // Record reverse dependencies
+    for (TaskID dep : deps) {
+        printf("adding the deps for id %d", id);
+        launches[dep].children.push_back(id);
+    }
+
+    // If no dependencies, mark it ready
+    if (deps.empty()) {
+        printf("adding id %d to ready queue\n", id);
+        ready_queue.push(id);
+    }
+
+    return id;
+    // return 0;
+
 }
 
 void TaskSystemParallelThreadPoolSleeping::sync() {
+    // Process launches in dependency order
+    while (true) {
+        printf("running sync\n");
+        TaskID next_launch = -1;
 
-    //
-    // TODO: CS149 students will modify the implementation of this method in Part B.
-    //
+        {
+            unique_lock<mutex> lock(graph_mutex);
 
-    return;
+            if (ready_queue.empty()) {
+                if (unfinished_launches == 0)
+                    break; 
+
+                // If nothing ready yet, wait for dependencies
+                sync_cv.wait(lock);
+                continue;
+            }
+
+            next_launch = ready_queue.front();
+            ready_queue.pop();
+        }
+
+        // Execute this launch using existing run() system
+        task_lock.lock();
+        TaskInfo &info = launches[next_launch];
+        cur_runnable = info.runnable;
+        total_tasks = info.num_total_tasks;
+        stop_ = false;
+        num_tasks_run.store(0);
+
+        for (int i = 0; i < info.num_total_tasks; i++) {
+            printf("added task to tasks for %d\n", i);
+            tasks.push(i);
+        }
+
+        cv_.notify_all();
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            done_cv.wait(lock, [this] {
+                return num_tasks_run.load() >= total_tasks;
+            });
+        }
+        task_lock.unlock();
+
+
+        // Mark launch complete and update dependents
+        {
+            unique_lock<mutex> lock(graph_mutex);
+            unfinished_launches--;
+
+            for (TaskID child : info.children) {
+                TaskInfo &child_info = launches[child];
+                child_info.remaining_deps--;
+
+                if (child_info.remaining_deps == 0) {
+                    ready_queue.push(child);
+                }
+            }
+
+            if (unfinished_launches == 0) {
+                sync_cv.notify_all();
+
+            } else {
+                sync_cv.notify_all(); // wake up waiting sync()
+            }
+        }
+    }
+
 }
