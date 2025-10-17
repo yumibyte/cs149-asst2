@@ -119,8 +119,6 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
 
         condition_variable cv_;
         bool stop_ = false;
-        mutex destructor_lock;
-        mutex run_lock;
 
         mutex task_lock;
         mutex queue_mutex;
@@ -129,15 +127,6 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         int total_tasks;
         atomic<int> num_tasks_run;
         condition_variable done_cv;
-
-        // for async task launches:
-        // unordered_map<TaskID, TaskInfo> launches;
-        // queue<TaskID> ready_queue;
-        // atomic<int> next_task_id{0};
-        // atomic<int> unfinished_launches{0};
-
-        // mutex graph_mutex;
-        // condition_variable sync_cv; 
 };
 
 #endif

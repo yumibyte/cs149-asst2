@@ -136,10 +136,8 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
 
         {
             unique_lock<mutex> lock(queue_mutex);
-            // printf("getting ready to execute a task\n");
 
             cv_.wait(lock, [this] {
-                // printf("put a thread to sleep\n");
                 return (!tasks.empty() && cur_runnable != nullptr) || stop_;
             });
 
@@ -152,49 +150,33 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
                 next_task_id = tasks.front();
                 tasks.pop();
                 task_runner = cur_runnable;  
-                // printf("set next_task_id to be run for %d\n", next_task_id);
             }
 
         }
         if (task_runner != nullptr && next_task_id >= 0) {
-            // printf("running next task %d\n", next_task_id);
             task_runner->runTask(next_task_id, total_tasks);
 
             int done = num_tasks_run.fetch_add(1) + 1;
             if (done == total_tasks) {
                 lock_guard<mutex> lock(queue_mutex);
-                done_cv.notify_one();  // notify run() that all tasks are done
+                done_cv.notify_one();  
             }
         }
     }
 }
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
     cur_runnable = nullptr;
 
     for (int i = 0; i < num_threads; ++i) {
         threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
-        // printf("initialize thread %d\n", i);
     }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
     {
         unique_lock<mutex> lock(queue_mutex);
         stop_ = true;
-        // printf("main thread is done\n");
     }
 
     cv_.notify_all();
@@ -206,14 +188,7 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
 
-
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
     vector<TaskID> no_deps;
-    printf("adding async task with %d total tasks\n", num_total_tasks);
     runAsyncWithDeps(runnable, num_total_tasks, no_deps);
     sync();
 }
@@ -221,10 +196,6 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                                     const std::vector<TaskID>& deps) {
 
-
-    //
-    // TODO: CS149 students will implement this method in Part B.
-    //
 
     unique_lock<mutex> lock(graph_mutex);
 
@@ -239,15 +210,12 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnabl
     launches[id] = move(info);
     unfinished_launches++;
 
-    // Record reverse dependencies
     for (TaskID dep : deps) {
-        printf("adding the deps for id %d", id);
         launches[dep].children.push_back(id);
     }
 
-    // If no dependencies, mark it ready
+    // if no dependencies, mark it ready
     if (deps.empty()) {
-        printf("adding id %d to ready queue\n", id);
         ready_queue.push(id);
     }
 
@@ -256,9 +224,7 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnabl
 
 void TaskSystemParallelThreadPoolSleeping::sync() {
 
-    // Process launches in dependency order
     while (true) {
-        printf("running sync\n");
         TaskID next_launch = -1;
 
         {
@@ -268,7 +234,7 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
                 if (unfinished_launches == 0)
                     break; 
 
-                // If nothing ready yet, wait for dependencies
+                // if nothing ready yet, wait for dependencies
                 sync_cv.wait(lock);
                 continue;
             }
@@ -277,7 +243,7 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
             ready_queue.pop();
         }
 
-        // Execute this launch using existing run() system
+        // execute this launch using existing run() system
         task_lock.lock();
         TaskInfo &info = launches[next_launch];
         cur_runnable = info.runnable;
@@ -286,7 +252,6 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
         num_tasks_run.store(0);
 
         for (int i = 0; i < info.num_total_tasks; i++) {
-            printf("added task to tasks for %d\n", i);
             tasks.push(i);
         }
 
@@ -299,8 +264,7 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
         }
         task_lock.unlock();
 
-
-        // Mark launch complete and update dependents
+        // mark launch complete and update dependents
         {
             unique_lock<mutex> lock(graph_mutex);
             unfinished_launches--;
@@ -318,11 +282,11 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
                 sync_cv.notify_all();
 
             } else {
-                sync_cv.notify_all(); // wake up waiting sync()
+                // wake up waiting sync()
+                sync_cv.notify_all(); 
             }
         }
     }
-
 
     return;
 }

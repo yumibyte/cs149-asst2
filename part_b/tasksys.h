@@ -94,8 +94,6 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
 
         condition_variable cv_;
         bool stop_ = false;
-        mutex destructor_lock;
-        mutex run_lock;
 
         mutex task_lock;
         mutex queue_mutex;

@@ -135,7 +135,6 @@ void TaskSystemParallelThreadPoolSpinning::spinningWork() {
             }
         }
         if (task_runner && task_id >= 0) {
-            // printf("running next task %d\n", next_task_id);
             task_runner->runTask(task_id, total_tasks);
 
             lock_guard<mutex> lock(task_lock);
@@ -144,21 +143,12 @@ void TaskSystemParallelThreadPoolSpinning::spinningWork() {
             if (num_tasks_completed == total_tasks) {
                 are_workers_done = true;
                 current_runnable = nullptr;
-                // printf("triggering done\n");
             }
-        } else {
-            this_thread::yield();
-        }
+        } 
     }
 }
 
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-
     // initialize our threads, although inefficient, at the beginning
     // of our run function
     current_runnable = nullptr;
@@ -170,8 +160,6 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
-    // printf("setting is done to true\n");
-
     {
         lock_guard<mutex> lock(task_lock);
         is_main_thread_done = true;
@@ -201,9 +189,7 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
             lock_guard<mutex> lock(task_lock);
             if (are_workers_done) break;
         }
-        this_thread::yield();
     }
-    // printf("workers are done\n");
     
 }
 
@@ -236,10 +222,8 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
 
         {
             unique_lock<mutex> lock(queue_mutex);
-            // printf("getting ready to execute a task\n");
 
             cv_.wait(lock, [this] {
-                // printf("put a thread to sleep\n");
                 return (!tasks.empty() && cur_runnable != nullptr) || stop_;
             });
 
@@ -252,12 +236,10 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
                 next_task_id = tasks.front();
                 tasks.pop();
                 task_runner = cur_runnable;  
-                // printf("set next_task_id to be run for %d\n", next_task_id);
             }
 
         }
         if (task_runner != nullptr && next_task_id >= 0) {
-            // printf("running next task %d\n", next_task_id);
             task_runner->runTask(next_task_id, total_tasks);
 
             int done = num_tasks_run.fetch_add(1) + 1;
@@ -270,32 +252,18 @@ void TaskSystemParallelThreadPoolSleeping::sleepingWork() {
 }
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
-    // might be useful... https://www.geeksforgeeks.org/cpp/thread-pool-in-cpp/
     cur_runnable = nullptr;
 
     for (int i = 0; i < num_threads; ++i) {
         threads_.emplace_back(&TaskSystemParallelThreadPoolSleeping::sleepingWork, this);
-        // printf("initialize thread %d\n", i);
     }
 
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
     {
         unique_lock<mutex> lock(queue_mutex);
         stop_ = true;
-        // printf("main thread is done\n");
     }
 
     cv_.notify_all();
@@ -308,13 +276,7 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
 
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
     unique_lock<mutex> lock(task_lock);
-    // printf("setting up run\n");
 
     cur_runnable = runnable;
     total_tasks = num_total_tasks;
@@ -323,13 +285,10 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
 
     for (int i = 0; i < num_total_tasks; i++) {
         unique_lock<std::mutex> lock(queue_mutex);
-        // printf("enqueue task i: %d\n", i);
         tasks.push(i);
     }
     cv_.notify_all();
 
-
-    // printf("finished setting in run\n");
     {
         std::unique_lock<std::mutex> lock(queue_mutex);
         done_cv.wait(lock, [this] {
@@ -337,7 +296,7 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
         });
     }
 
-    cur_runnable = nullptr;  // optional: clean up
+    cur_runnable = nullptr;  
 
 }
 
