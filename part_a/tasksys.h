@@ -2,7 +2,15 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include <unordered_map>
 
+using namespace std;
 /*
  * TaskSystemSerial: This class is the student's implementation of a
  * serial task execution engine.  See definition of ITaskSystem in
@@ -17,6 +25,7 @@ class TaskSystemSerial: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
 };
 
 /*
@@ -25,6 +34,7 @@ class TaskSystemSerial: public ITaskSystem {
  * call.  See definition of ITaskSystem in itasksys.h for documentation
  * of the ITaskSystem interface.
  */
+
 class TaskSystemParallelSpawn: public ITaskSystem {
     public:
         TaskSystemParallelSpawn(int num_threads);
@@ -34,6 +44,14 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+        void workToRun(IRunnable* runnable);
+
+    private:
+
+        atomic<int> tasks;
+        atomic<int> total_tasks{0};
+        int num_threads_ = 0;
 };
 
 /*
@@ -51,8 +69,31 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+        void spinningWork();
+    private:
+        vector<thread> threads_;
+
+        mutex task_lock;
+        int tasks;
+        int total_tasks;
+        int tasks_remaining;
+        int num_tasks_completed;
+        IRunnable* current_runnable;
+        
+        bool is_main_thread_done{false};
+        bool are_workers_done{false};
+
 };
 
+struct TaskInfo {
+    IRunnable* runnable;
+    int num_total_tasks;
+    int num_finished_tasks = 0;
+    std::vector<TaskID> deps;      // dependencies
+    std::vector<TaskID> children;  // dependent launches
+    int remaining_deps = 0;        // count of unresolved deps
+};
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
  * optimized implementation of a parallel task execution engine that uses
@@ -68,6 +109,24 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+    private:
+        void sleepingWork();
+        void enqueue(int i);
+
+        IRunnable* cur_runnable;
+        vector<thread> threads_;
+
+        condition_variable cv_;
+        bool stop_ = false;
+
+        mutex task_lock;
+        mutex queue_mutex;
+
+        queue<int> tasks;
+        int total_tasks;
+        atomic<int> num_tasks_run;
+        condition_variable done_cv;
 };
 
 #endif

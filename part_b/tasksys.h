@@ -2,6 +2,14 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <condition_variable>
+#include <mutex>
+#include <unordered_map>
+#include <queue>
+#include <atomic>
+#include <thread>
+
+using namespace std;
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -53,6 +61,15 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         void sync();
 };
 
+struct TaskInfo {
+    IRunnable* runnable;
+    int num_total_tasks;
+    int num_finished_tasks = 0;
+    std::vector<TaskID> deps;      // dependencies
+    std::vector<TaskID> children;  // dependent launches
+    int remaining_deps = 0;        // count of unresolved deps
+};
+
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
  * optimized implementation of a parallel task execution engine that uses
@@ -68,6 +85,32 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    private:
+        void sleepingWork();
+        void enqueue(int i);
+
+        IRunnable* cur_runnable;
+        vector<thread> threads_;
+
+        condition_variable cv_;
+        bool stop_ = false;
+
+        mutex task_lock;
+        mutex queue_mutex;
+
+        queue<int> tasks;
+        int total_tasks;
+        atomic<int> num_tasks_run;
+        condition_variable done_cv;
+
+        // for async task launches:
+        unordered_map<TaskID, TaskInfo> launches;
+        queue<TaskID> ready_queue;
+        atomic<int> next_task_id{0};
+        atomic<int> unfinished_launches{0};
+
+        mutex graph_mutex;
+        condition_variable sync_cv; 
 };
 
 #endif
